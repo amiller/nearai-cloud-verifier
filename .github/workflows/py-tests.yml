@@ -2,13 +2,16 @@ name: Python tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feat/**", "fix/**", "test/**", "ci/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    # nightly integration run: 07:00 UTC
+    - cron: "0 7 * * *"
 
 jobs:
-  test:
+  unit:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -26,5 +29,47 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio
 
-      - name: Run tests
+      - name: Run offline tests
         run: pytest py/tests/ -v -m "not integration and not live"
+
+  integration:
+    # Real PCCS + NRAS calls against the captured fixture. Opt-in:
+    # runs on nightly cron and on manual dispatch, not on every push/PR.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run integration tests (fixture → real PCCS + NRAS)
+        run: pytest py/tests/ -v -m integration
+
+  live:
+    # Full live roundtrip: fetches a fresh report from cloud-api.near.ai.
+    # Only on manual dispatch — avoids hammering the endpoint on cron.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run live tests (fetch + verify against cloud-api.near.ai)
+        run: pytest py/tests/ -v -m live
